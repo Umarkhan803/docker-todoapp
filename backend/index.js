@@ -55,7 +55,7 @@ app.get("/api/todos", async (req, res) => {
   res.json(todos);
 });
 
-// Start the server
+// Start the se rver
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
