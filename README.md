@@ -1,4 +1,4 @@
-# todoapp
+# Todo App
 Author Mohammed Umar Khan
 
 Todo App 
