@@ -4,7 +4,7 @@ FROM node:18-alpine AS build
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json package-lock.json ./
 
 # Install dependencies
 RUN npm ci --only=production=false
@@ -17,7 +17,7 @@ RUN npm run build
 
 
 # ---------- Production Stage ----------
-FROM nginx:alpine
+FROM nginx:1-alpine-slim
 
 # Remove default nginx files
 RUN rm -rf /usr/share/nginx/html/*
