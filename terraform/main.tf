@@ -2,33 +2,68 @@ provider "aws" {
   region = var.aws_region
 }
 
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-    tls = {
-      source  = "hashicorp/tls"
-      version = "~> 4.0"
-    }
-    local = {
-      source  = "hashicorp/local"
-      version = "~> 2.0"
-    }
-  }
+# --- ECR Repositories (stores your Docker images) ---
+resource "aws_ecr_repository" "backend" {
+  name = "todo-backend"
 }
-# Security Group - allows HTTP and SSH
-resource "aws_security_group" "todo_sg" {
-  name        = "todo-app-sg"
-  description = "Allow HTTP and SSH"
 
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+resource "aws_ecr_repository" "frontend" {
+  name = "todo-frontend"
+}
+
+# --- ECS Cluster (runs your containers) ---
+resource "aws_ecs_cluster" "todo_cluster" {
+  name = "todo-cluster"
+}
+
+# --- IAM Role for ECS Task ---
+resource "aws_iam_role" "ecs_task_execution" {
+  name = "ecsTaskExecutionRole"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Action    = "sts:AssumeRole",
+      Effect    = "Allow",
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution_policy" {
+  role       = aws_iam_role.ecs_task_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+# --- ECS Task Definition (defines what containers to run) ---
+resource "aws_ecs_task_definition" "todo_task" {
+  family                   = "todo-app"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "512"
+  memory                   = "1024"
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+
+  container_definitions = jsonencode([
+    {
+      name         = "backend"
+      image        = "${aws_ecr_repository.backend.repository_url}:${var.image_tag}"
+      essential    = true
+      portMappings = [{ containerPort = 5000 }]
+    },
+    {
+      name         = "frontend"
+      image        = "${aws_ecr_repository.frontend.repository_url}:${var.image_tag}"
+      essential    = true
+      portMappings = [{ containerPort = 80 }]
+    }
+  ])
+}
+
+# --- Security Group ---
+resource "aws_security_group" "todo_sg" {
+  name   = "todo-sg"
+  vpc_id = var.vpc_id
 
   ingress {
     from_port   = 80
@@ -38,10 +73,10 @@ resource "aws_security_group" "todo_sg" {
   }
 
   ingress {
-    from_port   = 8080
-    to_port     = 8080
+    from_port   = 5000
+    to_port     = 5000
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # Jenkins port
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
@@ -52,31 +87,17 @@ resource "aws_security_group" "todo_sg" {
   }
 }
 
-# Generate a private key
-resource "tls_private_key" "todo_key" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
+# --- ECS Service (keeps containers running) ---
+resource "aws_ecs_service" "todo_service" {
+  name            = "todo-service"
+  cluster         = aws_ecs_cluster.todo_cluster.id
+  task_definition = aws_ecs_task_definition.todo_task.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
 
-# Create key pair in AWS using the generated public key
-resource "aws_key_pair" "todo_key" {
-  key_name   = "todo-key"
-  public_key = tls_private_key.todo_key.public_key_openssh
-}
-resource "local_file" "private_key" {
-  content         = tls_private_key.todo_key.private_key_pem
-  filename        = "${path.module}/todo-key.pem"
-  file_permission = "0400" # Read-only, like chmod 400
-}
-# EC2 Instance
-resource "aws_instance" "todo_app" {
-  ami                    = var.ami_id # Amazon Linux 2 us-east-1
-  instance_type          = var.instance_type
-  key_name               = aws_key_pair.todo_key.key_name
-  vpc_security_group_ids = [aws_security_group.todo_sg.id]
-  user_data              = file("userdata.sh")
-
-  tags = {
-    Name = "todo-app-server"
+  network_configuration {
+    subnets          = var.subnet_ids
+    security_groups  = [aws_security_group.todo_sg.id]
+    assign_public_ip = true
   }
 }

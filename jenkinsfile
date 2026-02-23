@@ -1,0 +1,83 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION      = "us-east-1"
+        ECR_REGISTRY    = "98.81.151.44.dkr.ecr.us-east-1.amazonaws.com"
+        BACKEND_IMAGE   = "${ECR_REGISTRY}/todo-backend"
+        FRONTEND_IMAGE  = "${ECR_REGISTRY}/todo-frontend"
+        IMAGE_TAG       = "${BUILD_NUMBER}"   // Each build gets a unique tag
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    credentialsId: 'github-creds',
+                    url: 'https://github.com/Umarkhan803/devops-todoapp.git'
+            }
+        }
+
+        stage('Build Backend Image') {
+            steps {
+                script {
+                    dockerBackend = docker.build("${BACKEND_IMAGE}:${IMAGE_TAG}", "./backend")
+                }
+            }
+        }
+
+        stage('Build Frontend Image') {
+            steps {
+                script {
+                    dockerFrontend = docker.build("${FRONTEND_IMAGE}:${IMAGE_TAG}", "./frontend")
+                }
+            }
+        }
+
+        stage('Push to AWS ECR') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
+                                  credentialsId: 'aws-creds']]) {
+                    script {
+                        // Login to ECR
+                        sh """
+                            aws ecr get-login-password --region ${AWS_REGION} | \
+                            docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                        """
+                        // Push images
+                        dockerBackend.push("${IMAGE_TAG}")
+                        dockerBackend.push("latest")
+                        dockerFrontend.push("${IMAGE_TAG}")
+                        dockerFrontend.push("latest")
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
+                                  credentialsId: 'aws-creds']]) {
+                    dir('terraform') {
+                        sh """
+                            terraform init
+                            terraform plan -var="image_tag=${IMAGE_TAG}"
+                            terraform apply -auto-approve -var="image_tag=${IMAGE_TAG}"
+                        """
+                    }
+                }
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo "✅ Deployment successful! Build #${BUILD_NUMBER}"
+        }
+        failure {
+            echo "❌ Pipeline failed. Check logs above."
+        }
+    }
+}
