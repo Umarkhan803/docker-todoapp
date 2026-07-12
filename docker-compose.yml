@@ -7,6 +7,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+        BACKEND_HOST: todo-backend
     ports:
       - 3000:80
     volumes:

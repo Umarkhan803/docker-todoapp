@@ -6,7 +6,9 @@ provider "aws" {
 resource "aws_ecr_repository" "backend" {
   name = "todo-backend"
 }
-
+resource "s3_bucket" "ecr_bucket" {
+  bucket = "todo-ecr-bucket"
+}
 resource "aws_ecr_repository" "frontend" {
   name = "todo-frontend"
 }
@@ -18,7 +20,7 @@ resource "aws_ecs_cluster" "todo_cluster" {
 
 # --- IAM Role for ECS Task ---
 resource "aws_iam_role" "ecs_task_execution" {
-  name = "ecsTaskExecutionRole"
+  name = var.IAM_role_name
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
